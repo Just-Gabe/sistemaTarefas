@@ -1,2 +1,7 @@
-<h1>Tarefas#show</h1>
-<p>Find me in app/views/tarefas/show.html.erb</p>
+<h1>Detalhes da Tarefa</h1>
+
+<p><strong>Nome:</strong> <%= @tarefa.nometarefa %></p>
+<p><strong>Custo:</strong> R$ <%= @tarefa.custo %></p>
+<p><strong>Data:</strong> <%= @tarefa.data %></p>
+
+<%= link_to "Voltar para lista", tarefas_path %>
