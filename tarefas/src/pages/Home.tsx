@@ -1,16 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  IonContent, IonModal, IonButton, IonFab, IonFabButton, IonIcon, IonPage,
+  IonContent, IonModal, IonButton, IonIcon, IonPage,
   IonHeader, IonToolbar, IonTitle, IonItem, IonLabel, IonInput, IonList,
   IonButtons, IonDatetime, IonAlert, IonFooter, IonReorderGroup, IonReorder, ItemReorderEventDetail
 } from '@ionic/react';
 import { add, close, saveOutline, trashOutline, createOutline, reorderTwoOutline } from 'ionicons/icons';
+import { supabase } from '../supabaseClient';
 
 interface Tarefa {
   id: number;
   nome: string;
   custo: number;
-  dataLimite: string;
+  data_limite: string; 
   ordem: number;
 }
 
@@ -19,29 +20,37 @@ const ListaTarefas: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [showAlertExcluir, setShowAlertExcluir] = useState<{ show: boolean; id?: number }>({ show: false });
-
   const [nome, setNome] = useState('');
   const [custo, setCusto] = useState<string>('');
   const [data, setData] = useState(new Date().toISOString());
-  const [ordemManual, setOrdemManual] = useState<string>(''); 
+  const [ordemManual, setOrdemManual] = useState<string>('');
 
-  const totalCustos = useMemo(() => tarefas.reduce((acc, t) => acc + t.custo, 0), [tarefas]);
-  const formatarMoeda = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  const formatarData = (iso: string) => new Date(iso).toLocaleDateString('pt-BR');
+  const carregarTarefas = async () => {
+    const { data: dataBD, error } = await supabase
+      .from('Tarefas')
+      .select('*')
+      .order('ordem', { ascending: true });
 
-  const doReorder = (event: CustomEvent<ItemReorderEventDetail>) => {
-    const listaOrdenada = [...tarefas].sort((a, b) => a.ordem - b.ordem);
-    const novaLista = event.detail.complete(listaOrdenada);
-    
-    const listaAtualizada = novaLista.map((tarefa: Tarefa, index: number) => ({
-      ...tarefa,
-      ordem: index + 1
-    }));
-
-    setTarefas(listaAtualizada);
+    if (error) {
+      console.error("Erro ao carregar tarefas:", error.message);
+    } else {
+      setTarefas(dataBD || []);
+    }
   };
 
-  const handleSave = () => {
+  useEffect(() => {
+    carregarTarefas();
+  }, []);
+
+  const totalCustos = useMemo(() => tarefas.reduce((acc, t) => acc + (t.custo || 0), 0), [tarefas]);
+  const formatarMoeda = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatarData = (iso: string) => {
+    if (!iso) return '';
+    const [year, month, day] = iso.split('-'); 
+    return `${day}/${month}/${year}`;
+  };
+
+  const handleSave = async () => {
     const custoNum = parseFloat(custo);
     const novaOrdem = parseInt(ordemManual);
 
@@ -50,39 +59,68 @@ const ListaTarefas: React.FC = () => {
       return;
     }
 
-    const nomeExiste = tarefas.find(t => t.nome.toLowerCase() === nome.toLowerCase() && t.id !== editId);
-    if (nomeExiste) {
-      alert("Já existe uma tarefa com este nome");
-      return;
-    }
-
-    let listaNova = [...tarefas];
+    const tarefaObjeto = {
+      nome: nome,
+      custo: custoNum,
+      data_limite: data.split('T')[0], 
+      ordem: novaOrdem
+    };
 
     if (editId !== null) {
-      listaNova = listaNova.map(t => 
-        t.id === editId ? { ...t, nome, custo: custoNum, dataLimite: data, ordem: novaOrdem } : t
-      );
+      const { error } = await supabase
+        .from('Tarefas')
+        .update(tarefaObjeto)
+        .eq('id', editId);
+      
+      if (error) {
+        if (error.code === '23505') return alert("Erro: Já existe uma tarefa com este nome ou ordem.");
+        return alert("Erro ao editar: " + error.message);
+      }
     } else {
-      const novaTarefa: Tarefa = {
-        id: Date.now(),
-        nome,
-        custo: custoNum,
-        dataLimite: data,
-        ordem: novaOrdem
-      };
-      listaNova.push(novaTarefa);
+      const { error } = await supabase
+        .from('Tarefas')
+        .insert([tarefaObjeto]);
+
+      if (error) {
+        if (error.code === '23505') return alert("Erro: Já existe uma tarefa com este nome ou ordem.");
+        return alert("Erro ao salvar: " + error.message);
+      }
     }
 
-    const listaFinal = listaNova
-      .sort((a, b) => {
-        if (a.ordem === b.ordem) return a.id === editId ? -1 : 1; 
-        return a.ordem - b.ordem;
-      })
-      .map((t, index) => ({ ...t, ordem: index + 1 }));
-
-    setTarefas(listaFinal);
     fecharModal();
+    carregarTarefas(); 
   };
+
+  const excluirTarefaBanco = async (id: number) => {
+    const { error } = await supabase
+      .from('Tarefas')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      alert("Erro ao excluir do banco.");
+    } else {
+      carregarTarefas();
+    }
+    setShowAlertExcluir({ show: false });
+  };
+
+  const doReorder = async (event: CustomEvent<ItemReorderEventDetail>) => {
+    const novaLista = event.detail.complete([...tarefas]);
+    const listaComNovasOrdens = novaLista.map((t, index) => ({
+      ...t,
+      ordem: index + 1
+    }));
+
+    setTarefas(listaComNovasOrdens);
+    const updates = listaComNovasOrdens.map(t => 
+      supabase.from('Tarefas').update({ ordem: t.ordem }).eq('id', t.id)
+    );
+
+    await Promise.all(updates);
+    event.detail.complete();
+  };
+
 
   const fecharModal = () => {
     setShowModal(false);
@@ -97,7 +135,7 @@ const ListaTarefas: React.FC = () => {
     setEditId(t.id);
     setNome(t.nome);
     setCusto(t.custo.toString());
-    setData(t.dataLimite);
+    setData(t.data_limite);
     setOrdemManual(t.ordem.toString());
     setShowModal(true);
   };
@@ -119,15 +157,20 @@ const ListaTarefas: React.FC = () => {
       <IonContent>
         <IonList>
           <IonReorderGroup disabled={false} onIonItemReorder={doReorder}>
-            {tarefas.sort((a, b) => a.ordem - b.ordem).map((t) => (
-              <IonItem key={t.id} style={{ '--background': t.custo >= 1000 ? '#b0bf28' : 'transparent' }}>
+            {tarefas.map((t) => (
+              <IonItem 
+                key={t.id} 
+                style={{ '--background': t.custo >= 1000 ? '#b0bf28' : 'transparent' }}
+              >
                 <IonReorder slot="start">
                    <IonIcon icon={reorderTwoOutline} />
                 </IonReorder>
 
                 <IonLabel>
                   <h2 style={{ fontWeight: 'bold' }}>{t.ordem}. {t.nome}</h2>
-                  <p style={{color:"white"}}>Custo: {formatarMoeda(t.custo)} | Limite: {formatarData(t.dataLimite)}</p>
+                  <p style={{ color: t.custo >= 1000 ? "white" : "inherit" }}>
+                    Custo: {formatarMoeda(t.custo)} | Limite: {formatarData(t.data_limite)}
+                  </p>
                 </IonLabel>
 
                 <IonButtons slot="end">
@@ -143,7 +186,9 @@ const ListaTarefas: React.FC = () => {
           </IonReorderGroup>
         </IonList>
 
-        {tarefas.length === 0 && <p style={{ textAlign: 'center', marginTop: '20px' }}>Nenhuma tarefa encontrada</p>}
+        {tarefas.length === 0 && (
+          <p style={{ textAlign: 'center', marginTop: '20px' }}>Nenhuma tarefa encontrada no banco.</p>
+        )}
 
         <IonModal isOpen={showModal} onDidDismiss={fecharModal}>
           <IonHeader>
@@ -189,10 +234,10 @@ const ListaTarefas: React.FC = () => {
         <IonAlert
           isOpen={showAlertExcluir.show}
           header="Confirmar Exclusão"
-          message="Deseja realmente excluir esta tarefa?"
+          message="Deseja realmente excluir esta tarefa permanentemente?"
           buttons={[
             { text: 'Não', role: 'cancel' },
-            { text: 'Sim', handler: () => setTarefas(tarefas.filter(t => t.id !== showAlertExcluir.id).map((t, idx) => ({...t, ordem: idx + 1}))) }
+            { text: 'Sim', handler: () => excluirTarefaBanco(showAlertExcluir.id!) }
           ]}
           onDidDismiss={() => setShowAlertExcluir({ show: false })}
         />
