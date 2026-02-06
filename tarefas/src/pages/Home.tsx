@@ -5,7 +5,7 @@ import {
   IonButtons, IonDatetime, IonAlert, IonFooter, IonReorderGroup, IonReorder, ItemReorderEventDetail
 } from '@ionic/react';
 import { add, close, saveOutline, trashOutline, createOutline, reorderTwoOutline } from 'ionicons/icons';
-import { supabase } from '../supabaseClient';
+import { supabase } from '../supabase';
 
 interface Tarefa {
   id: number;
@@ -24,7 +24,6 @@ const ListaTarefas: React.FC = () => {
   const [custo, setCusto] = useState<string>('');
   const [data, setData] = useState(new Date().toISOString());
   const [ordemManual, setOrdemManual] = useState<string>('');
-
   const carregarTarefas = async () => {
     const { data: dataBD, error } = await supabase
       .from('Tarefas')
@@ -44,7 +43,7 @@ const ListaTarefas: React.FC = () => {
 
   const totalCustos = useMemo(() => tarefas.reduce((acc, t) => acc + (t.custo || 0), 0), [tarefas]);
   const formatarMoeda = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  const formatarData = (iso: string) => {
+  const formatarDataExibicao = (iso: string) => {
     if (!iso) return '';
     const [year, month, day] = iso.split('-'); 
     return `${day}/${month}/${year}`;
@@ -59,10 +58,17 @@ const ListaTarefas: React.FC = () => {
       return;
     }
 
+    if (custoNum < 0) {
+      alert("O custo deve ser maior ou igual a zero.");
+      return;
+    }
+
+    const dataParaBanco = data.includes('T') ? data.split('T')[0] : data;
+
     const tarefaObjeto = {
       nome: nome,
       custo: custoNum,
-      data_limite: data.split('T')[0], 
+      data_limite: dataParaBanco, 
       ordem: novaOrdem
     };
 
@@ -107,20 +113,21 @@ const ListaTarefas: React.FC = () => {
 
   const doReorder = async (event: CustomEvent<ItemReorderEventDetail>) => {
     const novaLista = event.detail.complete([...tarefas]);
-    const listaComNovasOrdens = novaLista.map((t, index) => ({
+    
+    const listaComNovasOrdens = novaLista.map((t: Tarefa, index: number) => ({
       ...t,
       ordem: index + 1
     }));
 
     setTarefas(listaComNovasOrdens);
-    const updates = listaComNovasOrdens.map(t => 
+
+    const updates = listaComNovasOrdens.map((t: Tarefa) => 
       supabase.from('Tarefas').update({ ordem: t.ordem }).eq('id', t.id)
     );
 
     await Promise.all(updates);
     event.detail.complete();
   };
-
 
   const fecharModal = () => {
     setShowModal(false);
@@ -157,19 +164,19 @@ const ListaTarefas: React.FC = () => {
       <IonContent>
         <IonList>
           <IonReorderGroup disabled={false} onIonItemReorder={doReorder}>
-            {tarefas.map((t) => (
+            {tarefas.map((t: Tarefa) => (
               <IonItem 
                 key={t.id} 
-                style={{ '--background': t.custo >= 1000 ? '#b0bf28' : 'transparent' }}
+                style={{ '--background': t.custo >= 1000 ? '#d67104' : 'transparent' }} // coloquei um tom de laranja escuro escolhido no hex color picker, amarelo estava muito forte
               >
                 <IonReorder slot="start">
-                   <IonIcon icon={reorderTwoOutline} />
+                   <IonIcon icon={reorderTwoOutline} color="medium" />
                 </IonReorder>
 
                 <IonLabel>
                   <h2 style={{ fontWeight: 'bold' }}>{t.ordem}. {t.nome}</h2>
                   <p style={{ color: t.custo >= 1000 ? "white" : "inherit" }}>
-                    Custo: {formatarMoeda(t.custo)} | Limite: {formatarData(t.data_limite)}
+                    Custo: {formatarMoeda(t.custo)} | Limite: {formatarDataExibicao(t.data_limite)}
                   </p>
                 </IonLabel>
 
@@ -203,17 +210,30 @@ const ListaTarefas: React.FC = () => {
           <IonContent className="ion-padding">
             <IonItem>
               <IonLabel position="stacked">Nome da Tarefa</IonLabel>
-              <IonInput value={nome} placeholder="Nome único" onIonChange={e => setNome(e.detail.value!)} />
+              <IonInput 
+                value={nome} 
+                placeholder="Ex: Comprar servidor" 
+                onIonChange={e => setNome(e.detail.value!)} 
+              />
             </IonItem>
 
             <IonItem>
               <IonLabel position="stacked">Custo (R$)</IonLabel>
-              <IonInput type="number" value={custo} placeholder="0.00" onIonChange={e => setCusto(e.detail.value!)} />
+              <IonInput 
+                type="number" 
+                value={custo} 
+                placeholder="0.00" 
+                onIonChange={e => setCusto(e.detail.value!)} 
+              />
             </IonItem>
 
             <IonItem>
               <IonLabel position="stacked">Data Limite</IonLabel>
-              <IonDatetime presentation="date" value={data} onIonChange={e => setData(e.detail.value as string)} />
+              <IonDatetime 
+                presentation="date" 
+                value={data} 
+                onIonChange={e => setData(e.detail.value as string)} 
+              />
             </IonItem>
 
             <IonItem>
@@ -227,6 +247,9 @@ const ListaTarefas: React.FC = () => {
 
             <IonButton expand="block" onClick={handleSave} className="ion-margin-top">
               <IonIcon icon={saveOutline} slot="start" /> Salvar Tarefa
+            </IonButton>
+            <IonButton expand="block" fill="clear" color="medium" onClick={fecharModal}>
+              Cancelar
             </IonButton>
           </IonContent>
         </IonModal>
