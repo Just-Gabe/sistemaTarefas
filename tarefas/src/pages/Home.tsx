@@ -33,7 +33,7 @@ const ListaTarefas: React.FC = () => {
     const listaOrdenada = [...tarefas].sort((a, b) => a.ordem - b.ordem);
     const novaLista = event.detail.complete(listaOrdenada);
     
-    const listaAtualizada = novaLista.map((tarefa, index) => ({
+    const listaAtualizada = novaLista.map((tarefa: Tarefa, index: number) => ({
       ...tarefa,
       ordem: index + 1
     }));
